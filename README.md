@@ -32,38 +32,46 @@ docker pull ghcr.io/phymea/earbox:latest-cpu
 - S3 buckets for input images and output results
 - Python 3.10+ installed locally
 
-### Installation
+### Installation & Setup (One-Time)
 
 ```bash
-# 1. Download and extract latest release
+# 1. Download and extract
 wget https://github.com/phymea/earbox-releases/releases/download/v1.0.0-rc1/earbox-runner-v1.0.0-rc1.tar.gz
-tar -xzf earbox-runner-v1.0.0-rc1.tar.gz
-cd runner
+tar -xzf earbox-runner-v1.0.0-rc1.tar.gz && cd runner
 
-# 2. Download model weights
-mkdir -p weights
-wget -O weights/mrcnn_eb_weights_31032020.h5 \
-  https://github.com/phymea/earbox-releases/releases/download/weights-v1.0/mrcnn_eb_weights_31032020.h5
-
-# 3. Set up Python environment
+# 2. Set up Python environment
 ./setup_runner.sh
 source .venv/bin/activate  # Or: .venv\Scripts\activate on Windows
 
-# 4. Create runner config for IAM setup
-cp runner-config.example.yaml runner-config.yaml
-# Edit runner-config.yaml: set your AWS region and automation_role_arn placeholder
+# 3. Set up AWS IAM roles (auto-creates runner-config.yaml)
+python setup_instance_role.py --region aws-region --s3-buckets my-input-bucket my-output-bucket
+python setup_automation_role.py --config runner-config.yaml
+```
 
-# 5. Set up AWS IAM roles (one-time setup)
-python setup_instance_role.py --config runner-config.yaml
-# Copy the Role ARN from output, then:
-python setup_automation_role.py --instance-profile-role-arn <ROLE_ARN_FROM_ABOVE> --update-config
-# The runner-config.yaml will be updated with the automation_role_arn from this output
+### Run the Pipeline
 
-# 6. Run the pipeline (GPU instance, default g4dn.xlarge)
+```bash
+# Basic: Run with session-specific input prefix
+python run_ec2_instance.py --input-prefix earbox-session-2024-10-20/
+
+# Override instance type (e.g., switch to CPU)
 python run_ec2_instance.py \
-  --input-bucket my-input-bucket \
-  --input-prefix earbox-session/ \
-  --output-bucket my-output-bucket
+  --input-prefix data/ \
+  --instance-type t3.xlarge \
+  --ami-id ami-01dad638e8f31ab9a \
+  --docker-image ghcr.io/phymea/earbox:latest-cpu
+
+# Use Docker image stored in ECR
+python run_ec2_instance.py \
+  --input-prefix data/ \
+  --docker-image 123456789.dkr.ecr.eu-north-1.amazonaws.com/earbox:latest
+```
+
+**Note:** Model weights (~170MB) are automatically downloaded on first run. To pre-download:
+```bash
+mkdir -p weights
+wget -O weights/mrcnn_eb_weights_31032020.h5 \
+  https://github.com/phymea/earbox-releases/releases/download/weights-v1.0/mrcnn_eb_weights_31032020.h5
 ```
 
 ### Verify Execution
@@ -78,34 +86,59 @@ aws s3 sync s3://your-output-bucket/results/ ./local-results/
 
 ---
 
-## ⚙️ Configuration
+## ⚙️ Customization
 
-### Custom Runner Settings
+### Customize Instance Type or Region
 
-To customize EC2 instance type, Docker image, or region, edit `runner-config.yaml`:
+The `setup_instance_role.py` script auto-creates `runner-config.yaml` with GPU defaults. To customize:
 
-```yaml
-aws:
-  region: eu-north-1
-  instance_type: g4dn.xlarge  # Or: t3.xlarge (CPU), g4dn.2xlarge (faster GPU)
-  ami_id: ami-04020d21cabbb9d43  # Deep Learning AMI for GPU (Or: ami-01dad638e8f31ab9a - Amazon Linux 2023 for CPU)
-
-docker:
-  image: ghcr.io/phymea/earbox:latest-gpu  # Or: latest-cpu
-
-s3:
-  input_bucket: my-input-bucket
-  input_prefix: earbox-session/
-  output_bucket: my-output-bucket
-
-iam:
-  automation_role_arn: arn:aws:iam::123456789:role/EarboxAutomationRole
-```
-
-Then run without CLI parameters:
 ```bash
-python run_ec2_instance.py --config runner-config.yaml
+# Edit the auto-generated config
+nano runner-config.yaml
+
+# Change:
+# - aws.region (default: eu-north-1)
+# - aws.instance_type (default: g4dn.xlarge for GPU, or t3.xlarge for CPU)
+# - aws.ami_id (default: ami-04020d21cabbb9d43 for GPU)
+# - docker.image (default: latest-gpu, or latest-cpu)
+
+# Then run normally
+python run_ec2_instance.py --input-prefix data/
 ```
+
+### Using Private Docker Images (ECR)
+
+To mirror the public GHCR image to your private AWS ECR:
+
+```bash
+# 1. Create ECR repository (one-time)
+aws ecr create-repository --repository-name earbox --region eu-north-1
+
+# 2. Login to ECR
+aws ecr get-login-password --region eu-north-1 | \
+  docker login --username AWS --password-stdin 123456789.dkr.ecr.eu-north-1.amazonaws.com
+
+# 3. Pull from GHCR, tag for ECR, and push
+docker pull ghcr.io/phymea/earbox:latest-gpu
+docker tag ghcr.io/phymea/earbox:latest-gpu \
+  123456789.dkr.ecr.eu-north-1.amazonaws.com/earbox:latest
+docker push 123456789.dkr.ecr.eu-north-1.amazonaws.com/earbox:latest
+
+# 4. Update runner-config.yaml:
+#   docker:
+#     image: 123456789.dkr.ecr.eu-north-1.amazonaws.com/earbox:latest
+#     registry_type: ecr
+#     ecr_auth: true
+```
+
+**Or override via CLI:**
+```bash
+python run_ec2_instance.py \
+  --docker-image 123456789.dkr.ecr.eu-north-1.amazonaws.com/earbox:latest \
+  --input-prefix data/
+```
+
+**Why use ECR?** Private ECR can improve security, control access, reduce internet egress costs, and ensure image availability.
 
 ### Custom Pipeline Settings
 
@@ -154,13 +187,13 @@ export AWS_DEFAULT_REGION="eu-north-1"
 
 ### Local Development (Docker)
 - **CPU**: 4+ cores recommended
-- **RAM**: 8GB minimum, 16GB recommended
+- **RAM**: 16GB recommended
 - **GPU** (optional): NVIDIA GPU with CUDA 11.8 support for faster processing
 - **Storage**: ~5GB for Docker image + model weights
 
 ### EC2 Runner (Production)
 - **Recommended instances:**
-  - CPU: `t3.xlarge`, `c5.large`
+  - CPU: `t3.xlarge`, `c5.2xlarge`
   - GPU: `g4dn.xlarge`, `g4dn.2xlarge` (recommended for production)
 - **AMI**: Amazon Linux 2 or Ubuntu 22.04
 - **Region**: Any AWS region with GPU availability (check [AWS regional services](https://aws.amazon.com/about-aws/global-infrastructure/regional-product-services/))
