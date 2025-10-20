@@ -30,7 +30,14 @@ docker pull ghcr.io/phymea/earbox:latest-cpu
 ### Prerequisites
 - AWS account with configured credentials ([AWS CLI setup guide](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-files.html))
 - S3 buckets for input images and output results
-- Python 3.10+ installed locally
+- Python 3.10+ with venv module installed:
+  ```bash
+  # Ubuntu/Debian
+  sudo apt install python3.10 python3.10-venv
+  
+  # RHEL/CentOS
+  sudo yum install python3 python3-venv
+  ```
 
 ### Installation & Setup (One-Time)
 
@@ -67,20 +74,29 @@ python run_ec2_instance.py \
   --docker-image 123456789.dkr.ecr.eu-north-1.amazonaws.com/earbox:latest
 ```
 
-**Note:** Model weights (~170MB) are automatically downloaded on first run. To pre-download:
-```bash
-mkdir -p weights
-wget -O weights/mrcnn_eb_weights_31032020.h5 \
-  https://github.com/phymea/earbox-releases/releases/download/weights-v1.0/mrcnn_eb_weights_31032020.h5
+### Monitor Execution
+
+The `run_ec2_instance.py` script outputs a CloudWatch console link. Click it to view logs in real-time:
+
+```
+Console link: https://console.aws.amazon.com/cloudwatch/home?region=...
 ```
 
-### Verify Execution
+**Check progress:**
+- Pipeline logs appear in CloudWatch as the container runs
+- Instance auto-terminates when complete
+- Results are uploaded to your S3 output bucket
 
+**Troubleshooting:**
+If the pipeline fails or CloudWatch has no logs, SSH into the instance and check system logs (or use Web UI):
 ```bash
-# Check CloudWatch logs
-python util_scripts/view_logs.py --job-id <JOB_ID_FROM_OUTPUT>
+# Get instance IP from EC2 console, then:
+ssh -i your-key.pem ec2-user@<instance-ip>
+sudo journalctl -u cloud-init-output -f
+```
 
-# Download results from S3
+**Download results:**
+```bash
 aws s3 sync s3://your-output-bucket/results/ ./local-results/
 ```
 
