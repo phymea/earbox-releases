@@ -14,7 +14,7 @@ Automated high-throughput phenotyping pipeline for maize ear image analysis.
 
 ```bash
 # GPU version with weights included (recommended, no download needed)
-docker pull ghcr.io/phymea/earbox:latest  # Points to weights-included
+docker pull ghcr.io/phymea/earbox:latest
 docker pull ghcr.io/phymea/earbox:latest-gpu-weights
 
 # GPU version (weights auto-download at runtime)
@@ -222,7 +222,7 @@ export AWS_DEFAULT_REGION="eu-north-1"
 
 ### AWS Networking Configuration (New in v1.0.0-rc2)
 
-The runner now supports custom VPC, subnet, and security group configuration for deployment in enterprise environments:
+The runner supports custom VPC, subnet, and security group configuration:
 
 ```yaml
 # In runner-config.yaml
@@ -254,7 +254,6 @@ ec2:
 ## 🐛 Issues & Support
 
 **Report issues:** [GitHub Issues](https://github.com/phymea/earbox-releases/issues)
-
 
 
 
