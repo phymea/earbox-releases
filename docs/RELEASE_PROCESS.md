@@ -7,6 +7,10 @@ Centralized release workflow for Earbox Analysis Pipeline and AWS Runner.
 ### 1. Tag Repositories
 
 ```bash
+# List tags newest first 
+git tag --sort=-version:refname
+# List remote tags
+git ls-remote --tags origin
 # Tag analysis repo
 cd earbox-analysis
 git tag v1.2.3
