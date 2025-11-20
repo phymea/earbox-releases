@@ -14,7 +14,7 @@ Automated high-throughput phenotyping pipeline for maize ear image analysis.
 
 ```bash
 # GPU version with weights included (recommended, no download needed)
-docker pull ghcr.io/phymea/earbox:latest  # Points to weights-included
+docker pull ghcr.io/phymea/earbox:latest
 docker pull ghcr.io/phymea/earbox:latest-gpu-weights
 
 # GPU version (weights auto-download at runtime)
@@ -24,7 +24,7 @@ docker pull ghcr.io/phymea/earbox:latest-gpu
 docker pull ghcr.io/phymea/earbox:latest-cpu
 ```
 
-**Note:** The `latest` tag now points to the GPU image with model weights included (~200MB larger). This eliminates the need to download weights at runtime. Use `latest-gpu` if you prefer the smaller image with automatic weight download.
+**Note:** The `latest` tag points to the GPU image with model weights included (~200MB larger). This eliminates the need to download weights at runtime. Use `latest-gpu` if you prefer the smaller image with automatic weight download.
 
 **📖 Docker usage:** See [GHCR Package Documentation](https://github.com/phymea/earbox/pkgs/container/earbox)
 
