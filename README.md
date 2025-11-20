@@ -6,7 +6,7 @@ Automated high-throughput phenotyping pipeline for maize ear image analysis.
 
 ## 📦 Latest Release
 
-**[Download v1.0.0-rc2](https://github.com/phymea/earbox-releases/releases/latest)** | **[All Releases](https://github.com/phymea/earbox-releases/releases)** | **[Download Weights](https://github.com/phymea/earbox-releases/releases/download/weights-v1.0/mrcnn_eb_weights_31032020.h5)**
+**[Download Latest](https://github.com/phymea/earbox-releases/releases/latest)** | **[All Releases](https://github.com/phymea/earbox-releases/releases)** | **[Download Weights](https://github.com/phymea/earbox-releases/releases/download/weights-v1.0/mrcnn_eb_weights_31032020.h5)**
 
 ---
 
@@ -14,7 +14,7 @@ Automated high-throughput phenotyping pipeline for maize ear image analysis.
 
 ```bash
 # GPU version with weights included (recommended, no download needed)
-docker pull ghcr.io/phymea/earbox:latest
+docker pull ghcr.io/phymea/earbox:latest  # Points to weights-included
 docker pull ghcr.io/phymea/earbox:latest-gpu-weights
 
 # GPU version (weights auto-download at runtime)
@@ -27,24 +27,6 @@ docker pull ghcr.io/phymea/earbox:latest-cpu
 **Note:** The `latest` tag now points to the GPU image with model weights included (~200MB larger). This eliminates the need to download weights at runtime. Use `latest-gpu` if you prefer the smaller image with automatic weight download.
 
 **📖 Docker usage:** See [GHCR Package Documentation](https://github.com/phymea/earbox/pkgs/container/earbox)
-
----
-
-## 🔄 What's Changed in v1.0.0-rc2
-
-### Stability & Performance
-- ✅ Fixed OOM crashes during large batch processing
-- ✅ Improved memory management with automatic cleanup
-- ✅ Enhanced resume functionality for interrupted runs
-
-### AWS Runner
-- ✅ Added VPC, subnet, and security group configuration
-- ✅ Automatic SSM permissions setup
-
-### Docker Images
-- ✅ New `-gpu-weights` variant with model weights included
-
-See [Release Notes](https://github.com/phymea/earbox-releases/releases/tag/v1.0.0-rc2) for full changelog.
 
 ---
 
@@ -65,9 +47,9 @@ See [Release Notes](https://github.com/phymea/earbox-releases/releases/tag/v1.0.
 ### Installation & Setup (One-Time)
 
 ```bash
-# 1. Download and extract
-wget https://github.com/phymea/earbox-releases/releases/download/v1.0.0-rc2/earbox-runner-v1.0.0-rc2.tar.gz
-tar -xzf earbox-runner-v1.0.0-rc2.tar.gz && cd runner
+# 1. Download and extract latest release
+wget https://github.com/phymea/earbox-releases/releases/latest/download/earbox-runner-*.tar.gz
+tar -xzf earbox-runner-*.tar.gz && cd runner
 
 # 2. Set up Python environment
 ./setup_runner.sh
@@ -220,9 +202,9 @@ export AWS_DEFAULT_REGION="eu-north-1"
 
 **Documentation:** [AWS CLI Configuration Guide](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-quickstart.html)
 
-### AWS Networking Configuration (New in v1.0.0-rc2)
+### AWS Networking Configuration
 
-The runner supports custom VPC, subnet, and security group configuration:
+The runner supports custom VPC, subnet, and security group configuration for deployment in enterprise environments:
 
 ```yaml
 # In runner-config.yaml
@@ -255,7 +237,7 @@ ec2:
 
 **Report issues:** [GitHub Issues](https://github.com/phymea/earbox-releases/issues)
 
-
+---
 
 ## 📄 License
 
@@ -270,6 +252,3 @@ This software is licensed under the BSL 1.1 license. See [LICENSE.md](LICENSE.md
 - **All Releases:** [Releases Page](https://github.com/phymea/earbox-releases/releases)
 - **AWS Documentation:** [EC2](https://docs.aws.amazon.com/ec2/) | [S3](https://docs.aws.amazon.com/s3/) | [IAM](https://docs.aws.amazon.com/iam/)
 
----
-
-**Version:** v1.0.0-rc2 | **Build Date:** 2025-11-04

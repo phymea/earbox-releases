@@ -1,0 +1,369 @@
+name: Prepare Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: 'Release version tag (e.g., v1.3.5-rc1)'
+        required: true
+        type: string
+      analysis_version:
+        description: 'Earbox-analysis version tag'
+        required: true
+        type: string
+      runner_version:
+        description: 'Earbox-aws-runner version tag'
+        required: true
+        type: string
+      skip_docker:
+        description: 'Skip Docker builds? (for runner-only releases)'
+        type: boolean
+        default: false
+
+jobs:
+  prepare-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    
+    steps:
+      - name: Checkout releases repo
+        uses: actions/checkout@v4
+        with:
+          path: releases-repo
+      
+      - name: Checkout analysis repo
+        uses: actions/checkout@v4
+        with:
+          repository: phymea/earbox-analysis
+          ref: ${{ github.event.inputs.analysis_version }}
+          path: analysis-src
+          token: ${{ secrets.ANALYSIS_REPO_PAT || secrets.GITHUB_TOKEN }}
+      
+      - name: Checkout runner repo
+        uses: actions/checkout@v4
+        with:
+          repository: phymea/earbox-aws-runner
+          ref: ${{ github.event.inputs.runner_version }}
+          path: runner-src
+          token: ${{ secrets.RUNNER_REPO_PAT || secrets.GITHUB_TOKEN }}
+      
+      - name: Extract version and metadata
+        id: version
+        run: |
+          RELEASE_VERSION="${{ github.event.inputs.release_version }}"
+          ANALYSIS_VERSION="${{ github.event.inputs.analysis_version }}"
+          RUNNER_VERSION="${{ github.event.inputs.runner_version }}"
+          
+          # Remove 'v' prefix from release version for Docker tags
+          VERSION=$(echo "$RELEASE_VERSION" | sed 's/^v//')
+          
+          echo "📋 Release Information"
+          echo "  Release version: $RELEASE_VERSION"
+          echo "  Analysis version: $ANALYSIS_VERSION"
+          echo "  Runner version: $RUNNER_VERSION"
+          echo "  Docker version: $VERSION"
+          
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "TAG_NAME=$RELEASE_VERSION" >> $GITHUB_OUTPUT
+          echo "BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> $GITHUB_OUTPUT
+          echo "ANALYSIS_COMMIT=$(cd analysis-src && git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          echo "RUNNER_COMMIT=$(cd runner-src && git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+      
+      - name: Login to GitHub Container Registry
+        if: github.event.inputs.skip_docker != 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Build and push CPU Docker image
+        if: github.event.inputs.skip_docker != 'true'
+        uses: docker/build-push-action@v5
+        with:
+          context: analysis-src
+          push: true
+          tags: |
+            ghcr.io/phymea/earbox:v${{ steps.version.outputs.VERSION }}-cpu
+            ghcr.io/phymea/earbox:latest-cpu
+          build-args: |
+            VERSION=${{ steps.version.outputs.VERSION }}
+            BUILD_DATE=${{ steps.version.outputs.BUILD_DATE }}
+            BUILD_COMMIT=${{ steps.version.outputs.ANALYSIS_COMMIT }}
+            BASE_IMAGE=python:3.10-slim
+      
+      - name: Build and push GPU Docker image
+        if: github.event.inputs.skip_docker != 'true'
+        uses: docker/build-push-action@v5
+        with:
+          context: analysis-src
+          push: true
+          tags: |
+            ghcr.io/phymea/earbox:v${{ steps.version.outputs.VERSION }}-gpu
+            ghcr.io/phymea/earbox:v${{ steps.version.outputs.VERSION }}
+            ghcr.io/phymea/earbox:latest-gpu
+          build-args: |
+            VERSION=${{ steps.version.outputs.VERSION }}
+            BUILD_DATE=${{ steps.version.outputs.BUILD_DATE }}
+            BUILD_COMMIT=${{ steps.version.outputs.ANALYSIS_COMMIT }}
+            BASE_IMAGE=nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04
+      
+      - name: Download weights for weights-included image
+        if: github.event.inputs.skip_docker != 'true'
+        run: |
+          echo "📥 Downloading model weights for weights-included image..."
+          mkdir -p analysis-src/weights
+          cd analysis-src
+          
+          WEIGHTS_URL="https://github.com/phymea/earbox-releases/releases/download/weights-v1.0/mrcnn_eb_weights_31032020.h5"
+          WEIGHTS_FILE="weights/mrcnn_eb_weights_31032020.h5"
+          
+          if [ -f "$WEIGHTS_FILE" ]; then
+            echo "✓ Weights file already exists, skipping download"
+          else
+            echo "Downloading from: $WEIGHTS_URL"
+            curl -L -o "$WEIGHTS_FILE" "$WEIGHTS_URL" || {
+              echo "⚠️  Failed to download weights, weights-included image will be built without them"
+              echo "   (This is OK - weights will be downloaded at runtime if missing)"
+              exit 0
+            }
+            
+            # Verify file was downloaded (check size, should be ~200MB)
+            if [ -f "$WEIGHTS_FILE" ]; then
+              SIZE=$(stat -f%z "$WEIGHTS_FILE" 2>/dev/null || stat -c%s "$WEIGHTS_FILE" 2>/dev/null || echo "0")
+              SIZE_MB=$((SIZE / 1024 / 1024))
+              echo "✓ Weights downloaded: ${SIZE_MB}MB"
+            fi
+          fi
+      
+      - name: Build and push GPU Docker image with weights included
+        if: github.event.inputs.skip_docker != 'true'
+        uses: docker/build-push-action@v5
+        with:
+          context: analysis-src
+          push: true
+          tags: |
+            ghcr.io/phymea/earbox:v${{ steps.version.outputs.VERSION }}-gpu-weights
+            ghcr.io/phymea/earbox:latest-gpu-weights
+            ghcr.io/phymea/earbox:latest
+          build-args: |
+            VERSION=${{ steps.version.outputs.VERSION }}
+            BUILD_DATE=${{ steps.version.outputs.BUILD_DATE }}
+            BUILD_COMMIT=${{ steps.version.outputs.ANALYSIS_COMMIT }}
+            BASE_IMAGE=nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04
+      
+      - name: Clean up old Docker image versions
+        if: github.event.inputs.skip_docker != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "🧹 Cleaning up old untagged Docker image versions..."
+          
+          # Get all package versions
+          VERSIONS=$(gh api /users/phymea/packages/container/earbox/versions --jq '.[] | select(.metadata.container.tags | length == 0) | .id')
+          
+          if [ -z "$VERSIONS" ]; then
+            echo "ℹ️  No untagged versions to delete"
+          else
+            echo "Found untagged versions to delete:"
+            for VERSION_ID in $VERSIONS; do
+              echo "  Deleting version ID: $VERSION_ID"
+              gh api --method DELETE /users/phymea/packages/container/earbox/versions/$VERSION_ID || echo "⚠️  Failed to delete $VERSION_ID"
+            done
+            echo "✅ Cleanup complete"
+          fi
+      
+      - name: Generate CHANGELOG.md
+        id: changelog
+        run: |
+          echo "📝 Generating CHANGELOG.md from both repositories..."
+          
+          # Generate changelog from analysis repo
+          echo "📦 Analysis Repository Changes"
+          cd analysis-src
+          git fetch --tags --force
+          
+          ANALYSIS_CURRENT="${{ github.event.inputs.analysis_version }}"
+          ANALYSIS_TAGS=$(git tag --sort=-version:refname)
+          ANALYSIS_PREVIOUS=$(echo "$ANALYSIS_TAGS" | grep -A1 "^${ANALYSIS_CURRENT}$" | tail -1 || echo "")
+          
+          if [ -z "$ANALYSIS_PREVIOUS" ]; then
+            echo "  No previous tag found, including all commits"
+            ANALYSIS_CHANGES=$(git log --pretty=format:"- %s (%h)" --reverse)
+          else
+            echo "  Comparing $ANALYSIS_PREVIOUS..$ANALYSIS_CURRENT"
+            ANALYSIS_CHANGES=$(git log ${ANALYSIS_PREVIOUS}..HEAD --pretty=format:"- %s (%h)" --reverse || echo "- No changes found")
+          fi
+          
+          # Generate changelog from runner repo
+          echo "📦 Runner Repository Changes"
+          cd ../runner-src
+          git fetch --tags --force
+          
+          RUNNER_CURRENT="${{ github.event.inputs.runner_version }}"
+          RUNNER_TAGS=$(git tag --sort=-version:refname)
+          RUNNER_PREVIOUS=$(echo "$RUNNER_TAGS" | grep -A1 "^${RUNNER_CURRENT}$" | tail -1 || echo "")
+          
+          if [ -z "$RUNNER_PREVIOUS" ]; then
+            echo "  No previous tag found, including all commits"
+            RUNNER_CHANGES=$(git log --pretty=format:"- %s (%h)" --reverse)
+          else
+            echo "  Comparing $RUNNER_PREVIOUS..$RUNNER_CURRENT"
+            RUNNER_CHANGES=$(git log ${RUNNER_PREVIOUS}..HEAD --pretty=format:"- %s (%h)" --reverse || echo "- No changes found")
+          fi
+          
+          # Create combined CHANGELOG.md
+          cd ..
+          cat > CHANGELOG.md << EOF
+          # Changelog
+          
+          ## ${{ github.event.inputs.release_version }} (${{ steps.version.outputs.BUILD_DATE }})
+          
+          ### Analysis Pipeline (${{ github.event.inputs.analysis_version }})
+          
+          $ANALYSIS_CHANGES
+          
+          ### AWS Runner (${{ github.event.inputs.runner_version }})
+          
+          $RUNNER_CHANGES
+          
+          ---
+          
+          **Build Info:**
+          - Date: ${{ steps.version.outputs.BUILD_DATE }}
+          - Analysis: ${{ github.event.inputs.analysis_version }} (${{ steps.version.outputs.ANALYSIS_COMMIT }})
+          - Runner: ${{ github.event.inputs.runner_version }} (${{ steps.version.outputs.RUNNER_COMMIT }})
+          EOF
+          
+          echo "✅ CHANGELOG.md generated"
+          echo "CHANGELOG_CONTENT<<EOF" >> $GITHUB_OUTPUT
+          cat CHANGELOG.md >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+      
+      - name: Package runner files
+        run: |
+          mkdir -p runner-package/runner
+          
+          # Copy orchestration scripts
+          cp runner-src/orchestration/*.py runner-package/runner/
+          cp runner-src/orchestration/*.j2 runner-package/runner/
+          cp runner-src/orchestration/*.example.yaml runner-package/runner/
+          cp runner-src/orchestration/requirements.txt runner-package/runner/
+          cp -r runner-src/orchestration/util_scripts runner-package/runner/
+          
+          # Copy setup script
+          if [ -f "runner-src/orchestration/setup_runner.sh" ]; then
+            cp runner-src/orchestration/setup_runner.sh runner-package/runner/
+            chmod +x runner-package/runner/setup_runner.sh
+          fi
+          
+          # Add LICENSE and README from releases repo if available
+          if [ -f "releases-repo/LICENSE.md" ]; then
+            cp releases-repo/LICENSE.md runner-package/
+          elif [ -f "runner-src/LICENSE.md" ]; then
+            cp runner-src/LICENSE.md runner-package/
+          fi
+          
+          if [ -f "releases-repo/README.md" ]; then
+            cp releases-repo/README.md runner-package/
+          elif [ -f "runner-src/RELEASE_README.md" ]; then
+            cp runner-src/RELEASE_README.md runner-package/README.md
+          fi
+          
+          # Create archives
+          cd runner-package
+          tar -czf ../earbox-runner-${{ steps.version.outputs.TAG_NAME }}.tar.gz .
+          zip -r ../earbox-runner-${{ steps.version.outputs.TAG_NAME }}.zip .
+      
+      - name: Create draft release
+        uses: softprops/action-gh-release@v1
+        with:
+          repository: phymea/earbox-releases
+          token: ${{ secrets.PUBLIC_RELEASES_PAT }}
+          tag_name: ${{ steps.version.outputs.TAG_NAME }}
+          name: Earbox ${{ steps.version.outputs.TAG_NAME }}
+          body: |
+            ## ⚠️ DRAFT RELEASE - Review before publishing
+            
+            **Source Versions:**
+            - Analysis: ${{ github.event.inputs.analysis_version }} (${{ steps.version.outputs.ANALYSIS_COMMIT }})
+            - Runner: ${{ github.event.inputs.runner_version }} (${{ steps.version.outputs.RUNNER_COMMIT }})
+            
+            **Quick Start:**
+            
+            EC2 Runner (recommended):
+            ```bash
+            # Download earbox-runner-${{ steps.version.outputs.TAG_NAME }}.tar.gz below
+            tar -xzf earbox-runner-${{ steps.version.outputs.TAG_NAME }}.tar.gz
+            cd runner
+            ./setup_runner.sh
+            
+            cp runner-config.example.yaml runner-config.yaml
+            # Edit runner-config.yaml with your settings
+            
+            python setup_instance_role.py --config runner-config.yaml
+            python setup_automation_role.py --instance-profile-role-arn <ARN_from_above>
+            python run_ec2_instance.py --config runner-config.yaml
+            ```
+            
+            Local Docker - S3 storage:
+            ```bash
+            docker run --rm --gpus all \
+              -v ~/.aws:/root/.aws:ro \
+              ghcr.io/phymea/earbox:latest-gpu \
+              s3://bucket/input/ --output-path s3://bucket/output/
+            ```
+            
+            Local Docker - Local data:
+            ```bash
+            docker run --rm \
+              -v /path/to/data:/data/input:ro \
+              -v /path/to/output:/data/output \
+              ghcr.io/phymea/earbox:latest-cpu \
+              /data/input --output-path /data/output
+            ```
+            
+            Local Docker - Custom config:
+            ```bash
+            docker run --rm --gpus all \
+              -v /path/to/pipeline-config.yaml:/app/pipeline-config.yaml:ro \
+              -v /path/to/data:/data:ro -v /path/to/output:/output \
+              ghcr.io/phymea/earbox:latest-gpu \
+              /data --output-path /output --config /app/pipeline-config.yaml
+            ```
+            
+            **Docker Images (GHCR):**
+            
+            GPU (weights auto-download at runtime):
+            ```bash
+            docker pull ghcr.io/phymea/earbox:${{ steps.version.outputs.VERSION }}-gpu
+            docker pull ghcr.io/phymea/earbox:latest-gpu
+            ```
+            
+            GPU with weights included (~200MB larger, no download needed, recommended):
+            ```bash
+            docker pull ghcr.io/phymea/earbox:${{ steps.version.outputs.VERSION }}-gpu-weights
+            docker pull ghcr.io/phymea/earbox:latest-gpu-weights
+            docker pull ghcr.io/phymea/earbox:latest  # Points to weights-included version (recommended)
+            ```
+            
+            CPU:
+            ```bash
+            docker pull ghcr.io/phymea/earbox:${{ steps.version.outputs.VERSION }}-cpu
+            docker pull ghcr.io/phymea/earbox:latest-cpu
+            ```
+            
+            **Changelog:**
+            ${{ steps.changelog.outputs.CHANGELOG_CONTENT }}
+            
+            **Build Info:**
+            - Date: ${{ steps.version.outputs.BUILD_DATE }}
+            - Analysis Commit: ${{ steps.version.outputs.ANALYSIS_COMMIT }}
+            - Runner Commit: ${{ steps.version.outputs.RUNNER_COMMIT }}
+          files: |
+            earbox-runner-${{ steps.version.outputs.TAG_NAME }}.tar.gz
+            earbox-runner-${{ steps.version.outputs.TAG_NAME }}.zip
+          draft: true
+          prerelease: true

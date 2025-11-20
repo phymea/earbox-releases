@@ -32,3 +32,4 @@ This License does **not grant you any right in any trademark or logo** of Licens
 ---
 
 For more information about the Business Source License, visit https://mariadb.com/bsl11.
+
