@@ -61,44 +61,44 @@ git push origin v1.1.2
 All secrets must be stored in the `earbox-releases` repository.
 
 - `PUBLIC_RELEASES_PAT`: For cross-repo operations (required)
-- `ANALYSIS_REPO_PAT`: If analysis repo is private (optional)
-- `RUNNER_REPO_PAT`: If runner repo is private (optional)
+- `ANALYSIS_REPO_PAT`: Optional override for analysis repo (optional)
+- `RUNNER_REPO_PAT`: Optional override for runner repo (optional)
+
+### Token Fallback Logic
+
+The workflow uses a fallback chain for authentication:
+1. **`PUBLIC_RELEASES_PAT`** (tried first) - One PAT with `repo` scope can access all private repos
+2. **Repo-specific PAT** (`ANALYSIS_REPO_PAT` or `RUNNER_REPO_PAT`) - Used if `PUBLIC_RELEASES_PAT` is not set
+3. **`GITHUB_TOKEN`** (last resort) - Only works for public repos
+
+**Recommendation:** Create one PAT with `repo` scope and use it for `PUBLIC_RELEASES_PAT`. This single token will work for all operations.
 
 ### Setup Secrets
 
-**1. Create Personal Access Tokens:**
+**1. Create Personal Access Token:**
 
-GitHub CLI doesn't have a command to create PATs. Create them via web interface:
+GitHub CLI doesn't have a command to create PATs. Create via web interface:
 Go to https://github.com/settings/tokens → "Generate new token (classic)" and create:
 
-- **PUBLIC_RELEASES_PAT** (required):
-  - Name: `earbox-releases-workflow`
-  - Expiration: Choose (e.g., 90 days or no expiration)
-  - Scopes: `repo` (full control)
-  
-- **ANALYSIS_REPO_PAT** (if analysis repo is private):
-  - Name: `earbox-analysis-checkout`
-  - Expiration: Choose
-  - Scopes: `repo` (full control)
-  
-- **RUNNER_REPO_PAT** (if runner repo is private):
-  - Name: `earbox-runner-checkout`
-  - Expiration: Choose
-  - Scopes: `repo` (full control)
+- **Name:** `earbox-releases-workflow`
+- **Expiration:** Choose (e.g., 90 days or no expiration)
+- **Scopes:** `repo` (full control)
 
-**Important:** Copy each token immediately after creation - you won't see it again!
+**Important:** Copy the token immediately after creation - you won't see it again!
 
-**2. Add Secrets to Repository:**
+**2. Add Secret to Repository:**
 
 ```bash
-# Add PUBLIC_RELEASES_PAT (required)
+# Add PUBLIC_RELEASES_PAT (recommended: use one PAT for everything)
 gh secret set PUBLIC_RELEASES_PAT -R phymea/earbox-releases
-# Paste the token when prompted
+# Paste your token when prompted
+```
 
-# Add ANALYSIS_REPO_PAT (if analysis repo is private)
+**Optional: Add repo-specific PATs (only if you want different tokens per repo):**
+
+```bash
+# Only needed if you want to use different tokens
 gh secret set ANALYSIS_REPO_PAT -R phymea/earbox-releases
-
-# Add RUNNER_REPO_PAT (if runner repo is private)
 gh secret set RUNNER_REPO_PAT -R phymea/earbox-releases
 ```
 

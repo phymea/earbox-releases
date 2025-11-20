@@ -39,7 +39,7 @@ jobs:
           repository: phymea/earbox-analysis
           ref: ${{ github.event.inputs.analysis_version }}
           path: analysis-src
-          token: ${{ secrets.ANALYSIS_REPO_PAT || secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.PUBLIC_RELEASES_PAT || secrets.ANALYSIS_REPO_PAT || secrets.GITHUB_TOKEN }}
       
       - name: Checkout runner repo
         uses: actions/checkout@v4
@@ -47,7 +47,7 @@ jobs:
           repository: phymea/earbox-aws-runner
           ref: ${{ github.event.inputs.runner_version }}
           path: runner-src
-          token: ${{ secrets.RUNNER_REPO_PAT || secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.PUBLIC_RELEASES_PAT || secrets.RUNNER_REPO_PAT || secrets.GITHUB_TOKEN }}
       
       - name: Extract version and metadata
         id: version
